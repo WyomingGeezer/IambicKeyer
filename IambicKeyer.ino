@@ -1,24 +1,24 @@
 /*
-' *************************************************************
-' FILE:    IambicKeyer.ino
-'
-' PURPOSE:
-' This application implements an Iambic Keyer with multiple applications.
-'
-' DOCUMENTATION:
-' See PROJECT - Iambic Electronic Keyer Utilizing The Arduino Duo.odt
-' See https://github.com/WyomingGeezer/IambicKeyer 
-'
-' REVISIONS:
-' 03/15/2017 JRH Initial creation
-' 03/23/2017 JRH Published "as is" state to GitHub
-'
-'
-' TODO:
-1. Add code for an LCD display
-2. Add code for recording Morse code as sent.
-3. Flesh out documentation, including a schematic of the desired implementation.
-'****************************************************************
+  ' *************************************************************
+  ' FILE:    IambicKeyer.ino
+  '
+  ' PURPOSE:
+  ' This application implements an Iambic Keyer with multiple applications.
+  '
+  ' DOCUMENTATION:
+  ' See PROJECT - Iambic Electronic Keyer Utilizing The Arduino Duo.odt
+  ' See https://github.com/WyomingGeezer/IambicKeyer
+  '
+  ' REVISIONS:
+  ' 03/15/2017 JRH Initial creation
+  ' 03/23/2017 JRH Published "as is" state to GitHub
+  '
+  '
+  ' TODO:
+  1. Add code for an LCD display
+  2. Add code for recording Morse code as sent.
+  3. Flesh out documentation, including a schematic of the desired implementation.
+  '****************************************************************
     Copyright (C) 2017 JAMES R. HARVEY
 
     This program is free software: you can redistribute it and/or modify
@@ -50,9 +50,9 @@
 #include "copyright.h"
 
 /*
- * GENERAL INFORMATION:
- * 
- */
+   GENERAL INFORMATION:
+
+*/
 // ---------------------------------------------------------------------------
 // TODO: Explain this with a diagram. For now, see toneAC2.h documentation
 // Be sure to include an inline 100 ohm resistor on one pin as you normally do when connecting a piezo or speaker.
@@ -85,65 +85,73 @@
 
 // GLOBAL VARIABLES
 long glTimer_Interval = 55712; // dit period in microseconds
-String gsMorse;
+String gsMorse; // string of Morse, i.e., "CQ" = "-.-. --.-" (note the space between the characters. This forces a one-dit space.
 String gsCallSign = "W7YV";
-volatile boolean gbState = false;
-String gsLastMessage;
-int giSideToneFrequency = 650;
-int giPADDLE_DIT_TIME = 75 ; //wpm = 1200 / pdt
+volatile boolean gbState = false; // use in StateMachine function
+String gsLastMessage; // holds the last message sent by StateMachine
+int giSideToneFrequency = 600; // CW side tone frequency.
+int giPADDLE_DIT_TIME = 75 ; //wpm = 1200 / pdt . Milliseconds for basic dit length.
+
 // CONSTANTS
-const int pinKEY_DIT = 2;
-const int pinKEY_DASH = 3;
-const int pin_SPEAKER_RED = 4; //2;
-const int pin_SPEAKER_BLACK = 5; //3;
+const int pinKEY_DIT = 2; // PIN 2 of the board connected to dit side of the key
+const int pinKEY_DASH = 3; // PIN3 of the board connected to the DASH side of the key
+
+// The push-pull nature of the ToneAC2 requires a 100 ohm resistor in series with the
+// speaker attached to the speaker pins
+const int pin_SPEAKER_RED = 4; // PIN4, connected to the speaker RED lead
+const int pin_SPEAKER_BLACK = 5; // PIN5, connected to the speaker BLACK lead
+
+
+
+// setWordsPerMinute(wpm) adjusts the timers to produce the desired wpm.
+
 
 
 void setWordsPerMinute(int wpm) {
   // 62500 = PARIS in 3.37 seconds = 17.804 wpm -- 1112750
   // 74184 = PARIS in 3.99 seconds = 15.04 wpm -- 1115727
   // avergage resultant equation: glTimer_Interval = 1114239 / wpm
-  glTimer_Interval = 1114239 / wpm ;
+  const unsigned long lTimerFactor = 1114239; // *WARNING* Processor dependant 
+  const int lPaddleTimeFactor = 1200;
+  glTimer_Interval = lTimerFactor / wpm ;
 
-  giPADDLE_DIT_TIME = 1200 / wpm;
+  giPADDLE_DIT_TIME = lPaddleTimeFactor / wpm;
 
 }
 
 
-void setup2() {
-  // setup IRQ for keys
-  pinMode(pinKEY_DIT, INPUT_PULLUP);
-  //attachInterrupt(digitalPinToInterrupt(pinKEY_DIT), keyStateMachine, CHANGE);
-}
 
 void setup() {
-  // initialize digital pin LED_BUILTIN as an output.
+  // initialize digital pins
+  
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(pinKEY_DIT, INPUT_PULLUP);
   pinMode(pinKEY_DASH, INPUT_PULLUP);
-  setup2();
 
 
-  setWordsPerMinute(18);
+  setWordsPerMinute(18);  // set default TODO: implement EEPROM storage of "last data"
+
+  // Brag stuff
   Serial.begin(9600);
   Serial.println(Copyright);
   Serial.println("Type $CR for additional copyright information.");
 
-  delay(1000);
 
-} 
+}
 
 
 volatile int giKeyDitState = 0;
 volatile int giKeyDashState = 0;
 volatile int giKeyState = 0;
 volatile unsigned long glKeyChangeTime = 0;
-unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
-unsigned long glDebounceDelay = 5;    // the debounce time; increase if the output flickers
+unsigned long glDebounceDelay = 5;    // key debounce time. CAREFULL: if too long, screws up key. If too short, screws up keying.
+
+// flags to define the type of key
 const int KEY_STRAIGHT = 0;
 const int KEY_PADDLE = 1;
 const int KEY_PADDLE_REVERSE = 2;
 
-
+// defautl key value. Change with $KM
 int giKeyMode = KEY_PADDLE;
 
 // Called from loop() to poll mechanical keys connected to the board
@@ -174,23 +182,24 @@ void processKeyers() {
 int paddleKeyDitStateMachine() { // handles only the DIT side of the key
   switch (giKeyDitState) {
 
-    case 0: // nothing
+    case 0: // look for key down
       if (digitalRead(pinKEY_DIT) == LOW)
 
       {
-        // debounce
+        // key down so debounce
         glKeyChangeTime = millis();
         //delay(5);
         while ((millis() - glKeyChangeTime) < glDebounceDelay) {
           //delay(1);
         }
+        // if still down, call it good
         if (digitalRead(pinKEY_DIT) == LOW) {
           giKeyDitState = 1;
         }
       }
       break;
 
-    case 1: // confirmed: dit went down
+    case 1: // confirmed: dit went down, so light up the speaker
       glKeyChangeTime = millis();
       toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, giSideToneFrequency);
       giKeyDitState = 2; //now wait the dit time
@@ -198,30 +207,32 @@ int paddleKeyDitStateMachine() { // handles only the DIT side of the key
 
     case 2: // wait for dit time
       while ((millis() - glKeyChangeTime) < giPADDLE_DIT_TIME) {
-        //delay(1);
+        //wait for key dit time, the kill the tone
       }
       giKeyDitState = 3;
       break;
+      
     case 3: // kill the tone and wait for interdit time
-      noToneAC2();
+      noToneAC2(); // kill the tone
       while ((millis() - glKeyChangeTime) < giPADDLE_DIT_TIME * 2) {
-        //delay(1);
+        // wait one element time (same as dit time)
       }
 
       giKeyDitState = 4;
       break;
 
     case 4: // dit is down, interdit is done, has key been released?
-      if (digitalRead(pinKEY_DIT) == HIGH)
+      
+      if (digitalRead(pinKEY_DIT) == HIGH) // poll the key
       {
+        // TODO: Think about this! Should we bail before dit time is done?
         // debounce
         glKeyChangeTime = millis();
-        //delay(5);
         while ((millis() - glKeyChangeTime) < glDebounceDelay) {
-          delay(1);
+          
         }
         if (digitalRead(pinKEY_DIT) == HIGH) {
-          noToneAC2();
+          // OOPS, key is up. get out of here
           giKeyDitState = 0;
         }
       } else {
@@ -552,7 +563,7 @@ boolean processCommands(String strCmd) {
 
     Serial.println("Copyright information PENDING");
     Serial.println("See <http://www.gnu.org/licenses/>");
-    
+
     return true;
   }
 
@@ -629,7 +640,7 @@ boolean processCommands(String strCmd) {
 void loop() {
   processKeyers(); // Poll the key to see what is needed
 
-// TODO: Timers need to be invoked only after it is determined that the input string is intended to be sent as Morse code.
+  // TODO: Timers need to be invoked only after it is determined that the input string is intended to be sent as Morse code.
 
   String strInput;
 
