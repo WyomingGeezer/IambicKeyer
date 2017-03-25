@@ -499,7 +499,7 @@ String convertToMorse(String strText) {
       
     }
     if (letter == ' ') {
-      sSpacer = "";
+      sSpacer = " ";
       strInput = strInput + ' ';
     } else if (letter <= '9') {
       strInput = strInput + numbers[int(letter - 48)]; strInput = strInput + sSpacer;
