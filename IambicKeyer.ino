@@ -12,7 +12,8 @@
   ' REVISIONS:
   ' 03/15/2017 JRH Initial creation
   ' 03/23/2017 JRH Published "as is" state to GitHub
-  '
+  ' 03/25/2017 JRH Added LED blink during Morse code, implemented KEY_PADDLE_REVERSE, 
+  '                fixed console blocking, added ability to send prosigns
   '
   ' TODO:
   1. Add code for an LCD display
@@ -93,8 +94,8 @@ int giSideToneFrequency = 600; // CW side tone frequency.
 int giPADDLE_DIT_TIME = 75 ; //wpm = 1200 / pdt . Milliseconds for basic dit length.
 
 // CONSTANTS
-const int pinKEY_DIT = 2; // PIN 2 of the board connected to dit side of the key
-const int pinKEY_DASH = 3; // PIN3 of the board connected to the DASH side of the key
+const int giPinKEY_LEFT = 2; // PIN 2 of the board connected to dit side of the key
+const int giPinKEY_RIGHT = 3; // PIN3 of the board connected to the DASH side of the key
 
 // The push-pull nature of the ToneAC2 requires a 100 ohm resistor in series with the
 // speaker attached to the speaker pins
@@ -124,9 +125,9 @@ void setWordsPerMinute(int wpm) {
 void setup() {
   // initialize digital pins
   
-  pinMode(LED_BUILTIN, OUTPUT);
-  pinMode(pinKEY_DIT, INPUT_PULLUP);
-  pinMode(pinKEY_DASH, INPUT_PULLUP);
+  pinMode(LED_BUILTIN, OUTPUT); // Blinks when morse is sending or when key is down
+  pinMode(giPinKEY_LEFT, INPUT_PULLUP);
+  pinMode(giPinKEY_RIGHT, INPUT_PULLUP);
 
 
   setWordsPerMinute(18);  // set default TODO: implement EEPROM storage of "last data"
@@ -145,7 +146,8 @@ volatile int giKeyDashState = 0;
 volatile int giKeyState = 0;
 volatile unsigned long glKeyChangeTime = 0;
 unsigned long glDebounceDelay = 5;    // key debounce time. CAREFULL: if too long, screws up key. If too short, screws up keying.
-
+int giPinKEY_DIT ;
+int giPinKEY_DASH;
 // flags to define the type of key
 const int KEY_STRAIGHT = 0;
 const int KEY_PADDLE = 1;
@@ -155,16 +157,23 @@ const int KEY_PADDLE_REVERSE = 2;
 int giKeyMode = KEY_PADDLE;
 
 // Called from loop() to poll mechanical keys connected to the board
+
 void processKeyers() {
   switch (giKeyMode) {
     case KEY_STRAIGHT:
+      giPinKEY_DIT = giPinKEY_LEFT;
+      giPinKEY_DASH = giPinKEY_RIGHT;    
       straightKeyStateMachine();
       break;
     case KEY_PADDLE:
+      giPinKEY_DIT = giPinKEY_LEFT;
+      giPinKEY_DASH = giPinKEY_RIGHT;
       paddleKeyStateMachine();
       break;
     case KEY_PADDLE_REVERSE:
-      paddleKeyStateMachine(); // TODO: NOT IMPLEMENTED
+      giPinKEY_DIT = giPinKEY_RIGHT;
+      giPinKEY_DASH = giPinKEY_LEFT;    
+      paddleKeyStateMachine();
       break;
 
 
@@ -179,11 +188,14 @@ void processKeyers() {
 // paddleKeyDashStateMahcine() handles the "dash" side of the Iambic key.
 // paddleKeyStateMachine() handles the Iambic Key function.
 
+
+
+
 int paddleKeyDitStateMachine() { // handles only the DIT side of the key
   switch (giKeyDitState) {
 
     case 0: // look for key down
-      if (digitalRead(pinKEY_DIT) == LOW)
+      if (digitalRead(giPinKEY_DIT) == LOW)
 
       {
         // key down so debounce
@@ -193,7 +205,7 @@ int paddleKeyDitStateMachine() { // handles only the DIT side of the key
           //delay(1);
         }
         // if still down, call it good
-        if (digitalRead(pinKEY_DIT) == LOW) {
+        if (digitalRead(giPinKEY_DIT) == LOW) {
           giKeyDitState = 1;
         }
       }
@@ -201,6 +213,7 @@ int paddleKeyDitStateMachine() { // handles only the DIT side of the key
 
     case 1: // confirmed: dit went down, so light up the speaker
       glKeyChangeTime = millis();
+      digitalWrite(LED_BUILTIN, HIGH);
       toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, giSideToneFrequency);
       giKeyDitState = 2; //now wait the dit time
       break;
@@ -213,6 +226,7 @@ int paddleKeyDitStateMachine() { // handles only the DIT side of the key
       break;
       
     case 3: // kill the tone and wait for interdit time
+    digitalWrite(LED_BUILTIN, LOW);
       noToneAC2(); // kill the tone
       while ((millis() - glKeyChangeTime) < giPADDLE_DIT_TIME * 2) {
         // wait one element time (same as dit time)
@@ -223,7 +237,7 @@ int paddleKeyDitStateMachine() { // handles only the DIT side of the key
 
     case 4: // dit is down, interdit is done, has key been released?
       
-      if (digitalRead(pinKEY_DIT) == HIGH) // poll the key
+      if (digitalRead(giPinKEY_DIT) == HIGH) // poll the key
       {
         // TODO: Think about this! Should we bail before dit time is done?
         // debounce
@@ -231,7 +245,7 @@ int paddleKeyDitStateMachine() { // handles only the DIT side of the key
         while ((millis() - glKeyChangeTime) < glDebounceDelay) {
           
         }
-        if (digitalRead(pinKEY_DIT) == HIGH) {
+        if (digitalRead(giPinKEY_DIT) == HIGH) {
           // OOPS, key is up. get out of here
           giKeyDitState = 0;
         }
@@ -255,7 +269,7 @@ int paddleKeyDashStateMachine() { // Handles only the DASH side of the key
   switch (giKeyDashState) {
 
     case 0: // nothing
-      if (digitalRead(pinKEY_DASH) == LOW)
+      if (digitalRead(giPinKEY_DASH) == LOW)
 
       {
         // debounce
@@ -264,7 +278,7 @@ int paddleKeyDashStateMachine() { // Handles only the DASH side of the key
         while ((millis() - glKeyChangeTime) < glDebounceDelay) {
           delay(1);
         }
-        if (digitalRead(pinKEY_DASH) == LOW) {
+        if (digitalRead(giPinKEY_DASH) == LOW) {
           giKeyDashState = 1;
         }
       }
@@ -272,6 +286,7 @@ int paddleKeyDashStateMachine() { // Handles only the DASH side of the key
 
     case 1: // confirmed: dash went down
       glKeyChangeTime = millis();
+      digitalWrite(LED_BUILTIN, HIGH);
       toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, giSideToneFrequency);
       giKeyDashState = 2; //now wait the dash time
       break;
@@ -283,10 +298,11 @@ int paddleKeyDashStateMachine() { // Handles only the DASH side of the key
       giKeyDashState = 3;
       break;
     case 3: // kill the tone and wait for element spacing time
+    digitalWrite(LED_BUILTIN, LOW);
       noToneAC2();
       while ((millis() - glKeyChangeTime) < (giPADDLE_DIT_TIME * 4)) {
         //delay(1);
-        if (digitalRead(pinKEY_DASH) == HIGH) {
+        if (digitalRead(giPinKEY_DASH) == HIGH) {
           //giKeyDashState = 0;
           // break;
         }
@@ -296,7 +312,7 @@ int paddleKeyDashStateMachine() { // Handles only the DASH side of the key
       break;
 
     case 4: // dash is down, element spacing time is done, has key been released?
-      if (digitalRead(pinKEY_DASH) == HIGH)
+      if (digitalRead(giPinKEY_DASH) == HIGH)
       {
         // debounce
         glKeyChangeTime = millis();
@@ -304,7 +320,7 @@ int paddleKeyDashStateMachine() { // Handles only the DASH side of the key
         while ((millis() - glKeyChangeTime) < glDebounceDelay) {
           //delay(1);
         }
-        if (digitalRead(pinKEY_DASH) == HIGH) {
+        if (digitalRead(giPinKEY_DASH) == HIGH) {
 
           giKeyDashState = 0;
         }
@@ -336,7 +352,7 @@ void straightKeyStateMachine() {
   switch (giKeyState) {
 
     case 0: // nothing
-      if (digitalRead(pinKEY_DIT) == LOW)
+      if (digitalRead(giPinKEY_LEFT) == LOW)
 
       {
         // debounce
@@ -345,7 +361,7 @@ void straightKeyStateMachine() {
         while ((millis() - glKeyChangeTime) < glDebounceDelay) {
           delay(1);
         }
-        if (digitalRead(pinKEY_DIT) == LOW) {
+        if (digitalRead(giPinKEY_LEFT) == LOW) {
           giKeyState = 1;
         }
       }
@@ -357,7 +373,7 @@ void straightKeyStateMachine() {
       giKeyState = 2;
       break;
     case 2: // dit is down, wait for dit time,
-      if (digitalRead(pinKEY_DIT) == HIGH)
+      if (digitalRead(giPinKEY_LEFT) == HIGH)
       {
         // debounce
         glKeyChangeTime = millis();
@@ -365,7 +381,7 @@ void straightKeyStateMachine() {
         while ((millis() - glKeyChangeTime) < glDebounceDelay) {
           delay(1);
         }
-        if (digitalRead(pinKEY_DIT) == HIGH) {
+        if (digitalRead(giPinKEY_LEFT) == HIGH) {
           noToneAC2();
           giKeyState = 0;
         }
@@ -389,19 +405,23 @@ void straightKeyStateMachine() {
 void stateMachine() {
 
   if (gbState == true) {
-    if (digitalRead(pinKEY_DASH) == LOW) {
+
+    /*
+    if (digitalRead(giPinKEY_DASH) == LOW) {
       digitalWrite(LED_BUILTIN, HIGH);
       toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, giSideToneFrequency);
       //Serial.print("650");
       Timer1.initialize(glTimer_Interval * 3);
 
-    } else if (digitalRead(pinKEY_DIT) == LOW) {
+    } else if (digitalRead(giPinKEY_DIT) == LOW) {
       digitalWrite(LED_BUILTIN, HIGH);
       toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, giSideToneFrequency);
       //Serial.print("650");
       Timer1.initialize(glTimer_Interval);
 
-    } else    if (gsMorse.length() != 0) {
+    } else  
+    */
+    if (gsMorse.length() != 0) {
       String element ;
       element = gsMorse.substring(0, 1);
 
@@ -442,10 +462,17 @@ void stateMachine() {
   gbState = !gbState ;
 }
 
-
+/////////////////////////////////////////////////////////////////
+// convertToMorse() takes a text string and converts it to a string of
+// Morse code dots and dashes.
+// INPUT: English text string
+// OUPUT: Morse code string of dots and dashes
+//
+// Prosigns are implemented using the <> characters to bracket the letters. For example,
+// the prosign <BT> is sent as "-...-"
 String convertToMorse(String strText) {
 
-  String letter, strInput;
+  String letter, strInput, sSpacer = " ";
   // Define
 
   // Length (with one extra character for the null terminator)
@@ -463,14 +490,23 @@ String convertToMorse(String strText) {
     char letter;
     letter = char_array[i];
 
+    if (letter == '<') {
+      sSpacer = ""; }
+      
+    if (letter == ">" ) {
+      strInput = strInput + ' ';
+      sSpacer = "";
+      
+    }
     if (letter == ' ') {
+      sSpacer = "";
       strInput = strInput + ' ';
     } else if (letter <= '9') {
-      strInput = strInput + numbers[int(letter - 48)]; strInput = strInput + ' ';
+      strInput = strInput + numbers[int(letter - 48)]; strInput = strInput + sSpacer;
       //Serial.println(strInput);
       //break;
     } else if (letter >= 'A') {
-      strInput = strInput + letters[int(letter) - 65]; strInput = strInput + ' ';
+      strInput = strInput + letters[int(letter) - 65]; strInput = strInput + sSpacer;
       //Serial.println(strInput);
       //break;
 
@@ -482,29 +518,34 @@ String convertToMorse(String strText) {
 // END OF TEXT STREAM MORSE CODE HANDLING
 /////////////////////////////////////////////////////////////////
 
-// TODO: 03/24/2017 This code works in Arduino serial monitor but not in a standard
-// terminal program. The code should not exit the routine UNTIL a CR is received. Better yet,
-// the code should simply gather characters in a non-blocking manner and report when a full
-// line has been received.
+
+String gsBuffer = "";
+
 String getInputLine(void) {
 
-  String strInput;
+  String sResult;
+  
   while (Serial.available() > 0) {
     delay(10);
     //Serial.print(Serial.available());
     //toneAC2(2, 3, 650,50);
     char letter = Serial.read(); // read ONE character from the keyboard
+    Serial.print(letter);
     //delay(500);
     //Serial.println(int(letter));
     //noInterrupts();
     if (letter == 13 ) { //look for CR key
       //Serial.println(strInput);
+      Serial.println();
+      sResult = gsBuffer;
+      gsBuffer = "";
+      return sResult;
       break;
     }
-    strInput = strInput + letter;
+    gsBuffer = gsBuffer + letter;
   }
 
-  return strInput;
+  return "";
 }
 
 void listSettings() {
@@ -626,7 +667,7 @@ boolean processCommands(String strCmd) {
   }
   // if here, there are no commands so we assume the input is a msg to send
   gsLastMessage = strCmd;
-  Serial.println(strCmd);
+  //Serial.println(strCmd);
   String sTemp = convertToMorse(strCmd);
   Serial.println(sTemp);
   gsMorse = sTemp; // post the CW string to the buffer monitored by the IRQ.
