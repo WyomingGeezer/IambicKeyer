@@ -1,4 +1,31 @@
+/*
+const struct morse_character {
+  char morse[6];
+  char letter;
+  
+};
+morse_characters
+struct KeyerSetupData {
+  int iSideToneFrequency;
+  byte bKeyMode;
+  byte bDebounceDelay;
+  int iBeaconIntervalSeconds;
+  byte byWPM;
+  char callsign[12];
+  char sBeaconMessage[60];
+};
 
+KeyerSetupData gaKeyerData = {
+  650, // side tone
+  1, // key mode
+  5, // debounce delay
+  0, // beacon interval
+  13, // wpm
+  "NOCALLSIGN",
+  "test"
+};
+
+*/
 const char * letters [26] = {
   ".-",     // A
   "-...",   // B

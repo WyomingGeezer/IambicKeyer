@@ -1,3 +1,4 @@
+
 /*
   ' *************************************************************
   ' FILE:    IambicKeyer.ino
@@ -12,8 +13,11 @@
   ' REVISIONS:
   ' 03/15/2017 JRH Initial creation
   ' 03/23/2017 JRH Published "as is" state to GitHub
-  ' 03/25/2017 JRH Added LED blink during Morse code, implemented KEY_PADDLE_REVERSE, 
+  ' 03/25/2017 JRH Added LED blink during Morse code, implemented KEY_PADDLE_REVERSE,
   '                fixed console blocking, added ability to send prosigns
+  ' 03/26/2017 JRH Added beacon feature, added documentation, rearranged code sections
+  ' 03/28/2017 JRH Fixed numerous bugs related to writing the EEPROM and beacon. Implemented
+  ' F() macro.
   '
   ' TODO:
   1. Add code for an LCD display
@@ -36,19 +40,34 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 */
+/* GENERAL NOTES
+ *  1. F() MACRO: See https://www.baldengineer.com/arduino-f-macro.html as well as
+ *  http://playground.arduino.cc/Learning/Memory . This macro refers to "the string
+ *  stored in flash memory" and saves dynamic RAM space.
+ *  
+
+*/
+#define INCLUDE_HAND_KEY
+
+
 
 
 // INCLUDE FILES FROM ARDUINO LIBRARY
+#include <EEPROM.h>
 // See http://playground.arduino.cc/Code/Timer1
 #include <TimerOne.h>
 // See https://bitbucket.org/teckel12/arduino-toneac2/wiki/Home
 #include <toneAC2.h>
+#include <MemoryFree.h>
+
+
 
 
 //INCLUDE FILES FROM JRH LIBRARY
 
 #include "morse.h"
 #include "copyright.h"
+
 
 /*
    GENERAL INFORMATION:
@@ -83,17 +102,8 @@
   REF: http://www.nu-ware.com/NuCode%20Help/index.html?morse_code_structure_and_timing_.htm
 */
 
-
-// GLOBAL VARIABLES
-long glTimer_Interval = 55712; // dit period in microseconds
-String gsMorse; // string of Morse, i.e., "CQ" = "-.-. --.-" (note the space between the characters. This forces a one-dit space.
-String gsCallSign = "W7YV";
-volatile boolean gbState = false; // use in StateMachine function
-String gsLastMessage; // holds the last message sent by StateMachine
-int giSideToneFrequency = 600; // CW side tone frequency.
-int giPADDLE_DIT_TIME = 75 ; //wpm = 1200 / pdt . Milliseconds for basic dit length.
-
-// CONSTANTS
+/////////////////////////////////////////////////////////////////
+// GLOBAL CONSTANTS
 const int giPinKEY_LEFT = 2; // PIN 2 of the board connected to dit side of the key
 const int giPinKEY_RIGHT = 3; // PIN3 of the board connected to the DASH side of the key
 
@@ -103,16 +113,114 @@ const int pin_SPEAKER_RED = 4; // PIN4, connected to the speaker RED lead
 const int pin_SPEAKER_BLACK = 5; // PIN5, connected to the speaker BLACK lead
 
 
+// flags to define the type of key
+const int KEY_STRAIGHT = 0;
+const int KEY_PADDLE = 1;
+const int KEY_PADDLE_REVERSE = 2;
+const unsigned long EEPROM_Signature = 0x195A0B0F;
+const int FLAG_ENABLE_DEBUG = 1;
+const int FLAG_ENABLE_HEARTBEAT = 2;
+const int FLAG_DISABLE_AUDIO = 4;
 
+
+/////////////////////////////////////////////////////////////////
+// GLOBAL VARIABLES
+long glTimer_Interval = 55712; // dit period in microseconds
+volatile String gsMorse; // string of Morse, i.e., "CQ" = "-.-. --.-" (note the space between the characters. This forces a one-dit space.
+volatile long glLastKeyElementSent;
+volatile boolean gbState = false; // use in StateMachine function
+String gsLastMessage; // holds the last message sent by StateMachine
+//gaKeyerData.iSideToneFrequency = 650; // CW side tone frequency.
+int giPADDLE_DIT_TIME = 75 ; //wpm = 1200 / pdt . Milliseconds for basic dit length.
+//String gsBeaconMessage = "";
+//long glBeaconIntervalSeconds = 0;
+
+volatile int giKeyDitState = 0;
+volatile int giKeyDashState = 0;
+volatile int giKeyState = 0;
+volatile unsigned long glKeyChangeTime = 0;
+//unsigned long glDebounceDelay = 5;    // key debounce time. CAREFULL: if too long, screws up key. If too short, screws up keying.
+int giPinKEY_DIT ;
+int giPinKEY_DASH;
+
+
+//int giKeyMode = KEY_PADDLE;// defautl key value. Change with $KM
+
+struct KeyerSetupData {
+  unsigned long ulSignature ;
+  int iFLAGS ;
+  int iSideToneFrequency;
+  byte bKeyMode;
+  byte bDebounceDelay;
+  long lBeaconIntervalSeconds;
+  byte byWPM;
+  char callsign[12];
+  char sBeaconMessage[60];
+};
+
+KeyerSetupData gaKeyerData = {
+  EEPROM_Signature , // EEPROM signature
+  FLAG_ENABLE_HEARTBEAT,
+  650, // side tone
+  1, // key mode
+  5, // debounce delay
+  0, // beacon interval
+  16, // wpm
+  "W7YV",
+  "DE W7YV <AR>"
+};
+
+/////////////////////////////////////////////////////////////////
+void setup() {
+  // initialize digital pins
+
+
+  pinMode(LED_BUILTIN, OUTPUT); // Blinks when morse is sending or when key is down
+  pinMode(giPinKEY_LEFT, INPUT_PULLUP);
+  pinMode(giPinKEY_RIGHT, INPUT_PULLUP);
+  
+
+  // Brag stuff
+  Serial.begin(9600);
+  Serial.println(F(Copyright));
+  Serial.println(F("Type $CR for additional copyright information."));
+  Serial.print(F("EEPROM size: ")); Serial.println(EEPROM.length());
+  Serial.print(F("Free RAM: ")); Serial.println(freeRam());
+  debugMsg(F("Debug is enabled"));
+
+  // read EEPROM signature
+  KeyerSetupData dataEEPROM;
+  EEPROM.get(0, dataEEPROM);
+  if (dataEEPROM.ulSignature != gaKeyerData.ulSignature) {
+    EEPROM.put(0, gaKeyerData);
+    Serial.println(F("Initializing EEPROM"));
+  } else
+  { // load EEPROM to memory
+    Serial.println(F("Loading EEPROM settings"));
+    gaKeyerData = dataEEPROM;
+  }
+  setWordsPerMinute(gaKeyerData.byWPM);  
+
+  listSettings();
+
+  Serial.println("####################################################");
+}
+
+int freeRam () {
+  extern int __heap_start, *__brkval;
+  int v;
+  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
+}
+/////////////////////////////////////////////////////////////////
 // setWordsPerMinute(wpm) adjusts the timers to produce the desired wpm.
 
-
-
 void setWordsPerMinute(int wpm) {
+
+  gaKeyerData.byWPM = wpm ;
   // 62500 = PARIS in 3.37 seconds = 17.804 wpm -- 1112750
   // 74184 = PARIS in 3.99 seconds = 15.04 wpm -- 1115727
   // avergage resultant equation: glTimer_Interval = 1114239 / wpm
-  const unsigned long lTimerFactor = 1114239; // *WARNING* Processor dependant 
+  const unsigned long lTimerFactor = 1114239; // *WARNING* Processor dependant
   const int lPaddleTimeFactor = 1200;
   glTimer_Interval = lTimerFactor / wpm ;
 
@@ -121,279 +229,11 @@ void setWordsPerMinute(int wpm) {
 }
 
 
+#if defined(INCLUDE_HAND_KEY)
 
-void setup() {
-  // initialize digital pins
-  
-  pinMode(LED_BUILTIN, OUTPUT); // Blinks when morse is sending or when key is down
-  pinMode(giPinKEY_LEFT, INPUT_PULLUP);
-  pinMode(giPinKEY_RIGHT, INPUT_PULLUP);
+#include "handkey.h"
 
-
-  setWordsPerMinute(18);  // set default TODO: implement EEPROM storage of "last data"
-
-  // Brag stuff
-  Serial.begin(9600);
-  Serial.println(Copyright);
-  Serial.println("Type $CR for additional copyright information.");
-
-
-}
-
-
-volatile int giKeyDitState = 0;
-volatile int giKeyDashState = 0;
-volatile int giKeyState = 0;
-volatile unsigned long glKeyChangeTime = 0;
-unsigned long glDebounceDelay = 5;    // key debounce time. CAREFULL: if too long, screws up key. If too short, screws up keying.
-int giPinKEY_DIT ;
-int giPinKEY_DASH;
-// flags to define the type of key
-const int KEY_STRAIGHT = 0;
-const int KEY_PADDLE = 1;
-const int KEY_PADDLE_REVERSE = 2;
-
-// defautl key value. Change with $KM
-int giKeyMode = KEY_PADDLE;
-
-// Called from loop() to poll mechanical keys connected to the board
-
-void processKeyers() {
-  switch (giKeyMode) {
-    case KEY_STRAIGHT:
-      giPinKEY_DIT = giPinKEY_LEFT;
-      giPinKEY_DASH = giPinKEY_RIGHT;    
-      straightKeyStateMachine();
-      break;
-    case KEY_PADDLE:
-      giPinKEY_DIT = giPinKEY_LEFT;
-      giPinKEY_DASH = giPinKEY_RIGHT;
-      paddleKeyStateMachine();
-      break;
-    case KEY_PADDLE_REVERSE:
-      giPinKEY_DIT = giPinKEY_RIGHT;
-      giPinKEY_DASH = giPinKEY_LEFT;    
-      paddleKeyStateMachine();
-      break;
-
-
-  }
-
-}
-/////////////////////////////////////////////////////////////////
-// This section contains the routines for the Iambic Keyer, i.e., a dual
-// paddle key that produces a stream of dits and dashes. The routines have the
-// following functions:
-// paddleKeyDitStateMachine() handles the "dit" side of the Iambic key.
-// paddleKeyDashStateMahcine() handles the "dash" side of the Iambic key.
-// paddleKeyStateMachine() handles the Iambic Key function.
-
-
-
-
-int paddleKeyDitStateMachine() { // handles only the DIT side of the key
-  switch (giKeyDitState) {
-
-    case 0: // look for key down
-      if (digitalRead(giPinKEY_DIT) == LOW)
-
-      {
-        // key down so debounce
-        glKeyChangeTime = millis();
-        //delay(5);
-        while ((millis() - glKeyChangeTime) < glDebounceDelay) {
-          //delay(1);
-        }
-        // if still down, call it good
-        if (digitalRead(giPinKEY_DIT) == LOW) {
-          giKeyDitState = 1;
-        }
-      }
-      break;
-
-    case 1: // confirmed: dit went down, so light up the speaker
-      glKeyChangeTime = millis();
-      digitalWrite(LED_BUILTIN, HIGH);
-      toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, giSideToneFrequency);
-      giKeyDitState = 2; //now wait the dit time
-      break;
-
-    case 2: // wait for dit time
-      while ((millis() - glKeyChangeTime) < giPADDLE_DIT_TIME) {
-        //wait for key dit time, the kill the tone
-      }
-      giKeyDitState = 3;
-      break;
-      
-    case 3: // kill the tone and wait for interdit time
-    digitalWrite(LED_BUILTIN, LOW);
-      noToneAC2(); // kill the tone
-      while ((millis() - glKeyChangeTime) < giPADDLE_DIT_TIME * 2) {
-        // wait one element time (same as dit time)
-      }
-
-      giKeyDitState = 4;
-      break;
-
-    case 4: // dit is down, interdit is done, has key been released?
-      
-      if (digitalRead(giPinKEY_DIT) == HIGH) // poll the key
-      {
-        // TODO: Think about this! Should we bail before dit time is done?
-        // debounce
-        glKeyChangeTime = millis();
-        while ((millis() - glKeyChangeTime) < glDebounceDelay) {
-          
-        }
-        if (digitalRead(giPinKEY_DIT) == HIGH) {
-          // OOPS, key is up. get out of here
-          giKeyDitState = 0;
-        }
-      } else {
-        // key still down, go back and do more dits
-        giKeyDitState = 1;
-      }
-
-      break;
-
-  }
-
-  return giKeyDitState;
-
-
-}
-int paddleKeyDashStateMachine() { // Handles only the DASH side of the key
-
-
-
-  switch (giKeyDashState) {
-
-    case 0: // nothing
-      if (digitalRead(giPinKEY_DASH) == LOW)
-
-      {
-        // debounce
-        glKeyChangeTime = millis();
-        //delay(5);
-        while ((millis() - glKeyChangeTime) < glDebounceDelay) {
-          delay(1);
-        }
-        if (digitalRead(giPinKEY_DASH) == LOW) {
-          giKeyDashState = 1;
-        }
-      }
-      break;
-
-    case 1: // confirmed: dash went down
-      glKeyChangeTime = millis();
-      digitalWrite(LED_BUILTIN, HIGH);
-      toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, giSideToneFrequency);
-      giKeyDashState = 2; //now wait the dash time
-      break;
-
-    case 2: // wait for dash time
-      while ((millis() - glKeyChangeTime) < (giPADDLE_DIT_TIME * 3)) {
-        delay(1);
-      }
-      giKeyDashState = 3;
-      break;
-    case 3: // kill the tone and wait for element spacing time
-    digitalWrite(LED_BUILTIN, LOW);
-      noToneAC2();
-      while ((millis() - glKeyChangeTime) < (giPADDLE_DIT_TIME * 4)) {
-        //delay(1);
-        if (digitalRead(giPinKEY_DASH) == HIGH) {
-          //giKeyDashState = 0;
-          // break;
-        }
-      }
-
-      giKeyDashState = 4;
-      break;
-
-    case 4: // dash is down, element spacing time is done, has key been released?
-      if (digitalRead(giPinKEY_DASH) == HIGH)
-      {
-        // debounce
-        glKeyChangeTime = millis();
-        //delay(5);
-        while ((millis() - glKeyChangeTime) < glDebounceDelay) {
-          //delay(1);
-        }
-        if (digitalRead(giPinKEY_DASH) == HIGH) {
-
-          giKeyDashState = 0;
-        }
-      } else {
-        // key still down, go back and do more dits
-        giKeyDashState = 1;
-      }
-
-      break;
-
-  }
-  return giKeyDashState;
-}
-// paddleKeyStateMachine() is the main routine for handling Iambic Keys. It polls both sides of the
-// key. When a key down condition is detected, the routine "locks" into that side until the key is released.
-void paddleKeyStateMachine() {
-
-  while (paddleKeyDitStateMachine() != 0) {} ;
-  while (paddleKeyDashStateMachine() != 0 ) { };
-
-}
-// END OF IAMBIC KEY HANDLING
-/////////////////////////////////////////////////////////////////
-
-/////////////////////////////////////////////////////////////////
-// This section contains the routines for the handling a straight key.
-
-void straightKeyStateMachine() {
-  switch (giKeyState) {
-
-    case 0: // nothing
-      if (digitalRead(giPinKEY_LEFT) == LOW)
-
-      {
-        // debounce
-        glKeyChangeTime = millis();
-        //delay(5);
-        while ((millis() - glKeyChangeTime) < glDebounceDelay) {
-          delay(1);
-        }
-        if (digitalRead(giPinKEY_LEFT) == LOW) {
-          giKeyState = 1;
-        }
-      }
-      break;
-
-    case 1: // dit went down
-      glKeyChangeTime = millis();
-      toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, giSideToneFrequency);
-      giKeyState = 2;
-      break;
-    case 2: // dit is down, wait for dit time,
-      if (digitalRead(giPinKEY_LEFT) == HIGH)
-      {
-        // debounce
-        glKeyChangeTime = millis();
-        //delay(5);
-        while ((millis() - glKeyChangeTime) < glDebounceDelay) {
-          delay(1);
-        }
-        if (digitalRead(giPinKEY_LEFT) == HIGH) {
-          noToneAC2();
-          giKeyState = 0;
-        }
-      }
-
-      break;
-
-  }
-}
-
-// END OF IAMBIC KEY HANDLING
-/////////////////////////////////////////////////////////////////
+#endif
 
 /////////////////////////////////////////////////////////////////
 // stateMachine() accepts a text string containing dots, dashes, and
@@ -406,48 +246,33 @@ void stateMachine() {
 
   if (gbState == true) {
 
-    /*
-    if (digitalRead(giPinKEY_DASH) == LOW) {
-      digitalWrite(LED_BUILTIN, HIGH);
-      toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, giSideToneFrequency);
-      //Serial.print("650");
-      Timer1.initialize(glTimer_Interval * 3);
-
-    } else if (digitalRead(giPinKEY_DIT) == LOW) {
-      digitalWrite(LED_BUILTIN, HIGH);
-      toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, giSideToneFrequency);
-      //Serial.print("650");
-      Timer1.initialize(glTimer_Interval);
-
-    } else  
-    */
     if (gsMorse.length() != 0) {
       String element ;
       element = gsMorse.substring(0, 1);
-
-      //Serial.print(" E="); Serial.print(element);
-      //Serial.print(" MC="); Serial.print(gsMorse); Serial.println(gsMorse.length());
-
 
       if (element == " ") {
         Timer1.initialize(glTimer_Interval * 2);
       }
       if (element == ".") {
         digitalWrite(LED_BUILTIN, HIGH);
-        toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, giSideToneFrequency);
+        if ((gaKeyerData.iFLAGS & FLAG_DISABLE_AUDIO) == 0) {
+          toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, gaKeyerData.iSideToneFrequency);
+        }
         //Serial.print("650");
         Timer1.initialize(glTimer_Interval);
       }
       if (element == "-") {
         digitalWrite(LED_BUILTIN, HIGH);
-        toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, giSideToneFrequency);
-        //Serial.print("800");
+        if ((gaKeyerData.iFLAGS & FLAG_DISABLE_AUDIO) == 0) {
+          toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, gaKeyerData.iSideToneFrequency);
+        }
         Timer1.initialize(glTimer_Interval * 3);
       }
       if (gsMorse.length() != 0 ) {
         gsMorse = gsMorse.substring(1);
       }
     } else {
+      glLastKeyElementSent = millis();
       Timer1.detachInterrupt();
     }
 
@@ -462,6 +287,14 @@ void stateMachine() {
   gbState = !gbState ;
 }
 
+void debugMsg(String sMsg) {
+
+  if (gaKeyerData.iFLAGS & FLAG_ENABLE_DEBUG) {
+    Serial.println(sMsg);
+    Serial.println(freeRam());
+  }
+}
+
 /////////////////////////////////////////////////////////////////
 // convertToMorse() takes a text string and converts it to a string of
 // Morse code dots and dashes.
@@ -470,9 +303,12 @@ void stateMachine() {
 //
 // Prosigns are implemented using the <> characters to bracket the letters. For example,
 // the prosign <BT> is sent as "-...-"
-String convertToMorse(String strText) {
 
-  String letter, strInput, sSpacer = " ";
+String convertToMorse(String strText) {
+  debugMsg ("Enter convertToMorse(" + strText + ")");
+
+  String letter, sSpacer = " ", strInput, sResult;
+  strInput = "";
   // Define
 
   // Length (with one extra character for the null terminator)
@@ -491,40 +327,49 @@ String convertToMorse(String strText) {
     letter = char_array[i];
 
     if (letter == '<') {
-      sSpacer = ""; }
-      
-    if (letter == ">" ) {
-      strInput = strInput + ' ';
       sSpacer = "";
-      
     }
-    if (letter == ' ') {
-      sSpacer = " ";
-      strInput = strInput + ' ';
-    } else if (letter <= '9') {
-      strInput = strInput + numbers[int(letter - 48)]; strInput = strInput + sSpacer;
-      //Serial.println(strInput);
-      //break;
-    } else if (letter >= 'A') {
-      strInput = strInput + letters[int(letter) - 65]; strInput = strInput + sSpacer;
-      //Serial.println(strInput);
-      //break;
+
+    if (letter == ">" ) {
+      strInput = strInput + " ";
+      sSpacer = "";
 
     }
+
+
+    if (letter == ' ') {
+      sSpacer = " ";
+      strInput = strInput + " ";
+    }
+
+    if ((letter >= 'A') && (letter <= 'Z')) {
+      strInput.concat(letters[int(letter) - 65]);
+      strInput.concat(sSpacer);
+    }
+
+    if ((letter >= '0') && (letter <= '9')) {
+      strInput.concat(numbers[int(letter - 48)]);
+      strInput.concat(sSpacer);
+
+    }
+
   }
+
   return strInput;
 }
 
 // END OF TEXT STREAM MORSE CODE HANDLING
 /////////////////////////////////////////////////////////////////
 
-
+/////////////////////////////////////////////////////////////////
+// getInputLine() reads a serial port and accumulates a line of text. When a CR
+// is received, the entire line is returned to the calling program.
 String gsBuffer = "";
 
 String getInputLine(void) {
 
   String sResult;
-  
+
   while (Serial.available() > 0) {
     delay(10);
     //Serial.print(Serial.available());
@@ -548,16 +393,26 @@ String getInputLine(void) {
   return "";
 }
 
+
+/////////////////////////////////////////////////////////////////
+// listSettings simply lists the internal variables along with the syntax
+// needed to change the values.
 void listSettings() {
 
   // list settings
-  Serial.println("$CALLSIGN = " + gsCallSign);
-  //Serial.println("$LM = " + gsLastMessage);
-  Serial.print("$KM = "); Serial.println(giKeyMode);
-  Serial.print("$PDT = "); Serial.println(giPADDLE_DIT_TIME);
-  Serial.print("$WPM = "); Serial.println(1114239 / glTimer_Interval);
-  Serial.print("$DBD = "); Serial.println(glDebounceDelay);
-  Serial.print("$STF = "); Serial.println(giSideToneFrequency);
+  Serial.print(F("$CALLSIGN ")); Serial.println(gaKeyerData.callsign);
+  Serial.println("$LM " + gsLastMessage);
+  Serial.print("$KM "); Serial.println(gaKeyerData.bKeyMode);
+  Serial.print("$PDT "); Serial.println(giPADDLE_DIT_TIME);
+  Serial.print("$WPM "); Serial.println(1114239 / glTimer_Interval);
+  Serial.print("$DBD "); Serial.println(gaKeyerData.bDebounceDelay);
+  Serial.print("$STF "); Serial.println(gaKeyerData.iSideToneFrequency);
+  Serial.print("$BI "); Serial.println(gaKeyerData.lBeaconIntervalSeconds);
+  Serial.print("$BM "); Serial.println(gaKeyerData.sBeaconMessage);
+  Serial.print("$SF "); Serial.println(gaKeyerData.iFLAGS, HEX);
+  Serial.print(F("Free Memory: ")); Serial.println(freeRam());
+
+
 
 
 }
@@ -565,12 +420,83 @@ void listSettings() {
 void(* resetFunc) (void) = 0;//declare reset function at address 0
 
 
+////////////////////////////////////////////////////////////////
+// EEPROM ROUTINES
+
+
+
+void listEEPROM() {
+  int address = 0;
+  byte value;
+
+  for (int address = 0; address < sizeof(KeyerSetupData) ; address++ ) {
+    // read a byte from the current address of the EEPROM
+    value = EEPROM.read(address);
+
+    Serial.print(address);
+    Serial.print("\t");
+    Serial.print(value, HEX);    Serial.print("\t"); Serial.print(value, DEC) ; Serial.print("\t"); Serial.print(char(value));
+    Serial.println();
+
+
+  }
+}
+
+void clearEEPROM() {
+
+  int address = 0;
+  byte value;
+
+  for (int i = 0 ; i < EEPROM.length() ; i++) {
+    EEPROM.write(i, 0);
+  }
+}
+
+
+
+
 boolean processCommands(String strCmd) {
   strCmd.toUpperCase();
-  if (strCmd.substring(0, 9) == "$CALLSIGN" ) {
-    Serial.print("Callsign was ") ; Serial.println(gsCallSign);
-    gsCallSign = strCmd.substring(9);
-    Serial.print("Callsign set to ") ; Serial.println(gsCallSign);
+  if (strCmd.substring(0, 9) == "$CS" ) {
+    Serial.print(F("Callsign was ")) ; Serial.println(gaKeyerData.callsign);
+    strCmd.substring(9).toCharArray(gaKeyerData.callsign, 10);
+    Serial.print(F("Callsign set to ")) ; Serial.println(gaKeyerData.callsign);
+
+
+    return true;
+  }
+
+  if (strCmd.substring(0, 3) == "$SF") {  // readout the EEPROM
+
+
+    gaKeyerData.iFLAGS = strCmd.substring(4).toInt();
+    return true;
+  }
+  if (strCmd.substring(0, 3) == "$EL") {  // readout the EEPROM
+
+
+    listEEPROM();
+    return true;
+  }
+  if (strCmd.substring(0, 3) == "$EC") {  // readout the EEPROM
+
+
+    clearEEPROM();
+    return true;
+  }
+
+  if (strCmd.substring(0, 3) == "$EW") {  // readout the EEPROM
+
+    EEPROM.put(0, gaKeyerData);
+    listEEPROM();
+    
+    return true;
+  }
+
+  if (strCmd.substring(0, 3) == "$ER") {  // readout the EEPROM
+
+
+    EEPROM.get(0, gaKeyerData);
     return true;
   }
   /*
@@ -582,8 +508,8 @@ boolean processCommands(String strCmd) {
   if (strCmd.substring(0, 3) == "$KM") {
 
 
-    giKeyMode = strCmd.substring(3).toInt();
-    Serial.print("Key mode set to "); Serial.println(giKeyMode);
+    gaKeyerData.bKeyMode = strCmd.substring(3).toInt();
+    Serial.print(F("Key mode set to ")); Serial.println(gaKeyerData.bKeyMode);
 
     return true;
   }
@@ -593,17 +519,30 @@ boolean processCommands(String strCmd) {
 
 
     giPADDLE_DIT_TIME = strCmd.substring(4).toInt();
-    Serial.print("Paddle dit time set to "); Serial.println(giPADDLE_DIT_TIME);
+    Serial.print(F("Paddle dit time set to ")); Serial.println(giPADDLE_DIT_TIME);
 
     return true;
   }
 
+  if (strCmd.substring(0, 3) == "$SM") {
 
+    Serial.print(F("Morse conversion: ")); Serial.println(convertToMorse(strCmd.substring(4)));
+
+    return true;
+  }
+  if (strCmd.substring(0, 3) == "$FR") {
+
+
+    Serial.print("Free RAM: "); Serial.println(freeRam());
+
+
+    return true;
+  }
   if (strCmd.substring(0, 3) == "$CR") {
 
 
-    Serial.println("Copyright information PENDING");
-    Serial.println("See <http://www.gnu.org/licenses/>");
+    Serial.println(F("Copyright information PENDING"));
+    Serial.println(F("See <http://www.gnu.org/licenses/>"));
 
     return true;
   }
@@ -621,7 +560,7 @@ boolean processCommands(String strCmd) {
 
     int iWPM ;
     iWPM = strCmd.substring(4).toInt();
-    Serial.print("Keyer speed set to "); Serial.println(iWPM);
+    Serial.print(F("Keyer speed set to ")); Serial.println(iWPM);
     setWordsPerMinute(iWPM);
     return true;
   }
@@ -629,31 +568,44 @@ boolean processCommands(String strCmd) {
   if (strCmd.substring(0, 4) == "$DBD") {
 
 
-    glDebounceDelay = strCmd.substring(4).toInt();
-    Serial.print("Debounce delay set to "); Serial.println(glDebounceDelay);
+    gaKeyerData.bDebounceDelay = strCmd.substring(4).toInt();
+    Serial.print(F("Debounce delay set to ")); Serial.println(gaKeyerData.bDebounceDelay);
 
     return true;
   }
   if (strCmd.substring(0, 4) == "$STF") {
 
 
-    giSideToneFrequency = strCmd.substring(4).toInt();
-    Serial.print("Sidetone frequency set to "); Serial.println(giSideToneFrequency);
+    gaKeyerData.iSideToneFrequency = strCmd.substring(4).toInt();
+    Serial.print(F("Sidetone frequency set to ")); Serial.println(gaKeyerData.iSideToneFrequency);
 
     return true;
   }
 
   if (strCmd.substring(0, 3) == "$LM" ) {
     if (gsLastMessage.length() == 0) {
-      Serial.println("No last message stored.");
+      Serial.println(F("No last message stored."));
       return true;
     }
-    Serial.print(gsLastMessage.length());
+    Serial.print(gsLastMessage);
     strCmd = gsLastMessage ;
 
   }
   if (strCmd.substring(0, 3) == "$LS" ) {
     listSettings();
+    strCmd = "";
+    return true;
+  }
+  if (strCmd.substring(0, 3) == "$BM" ) {
+    strCmd.substring(4).toCharArray(gaKeyerData.sBeaconMessage, sizeof(gaKeyerData.sBeaconMessage));
+
+    strCmd = "";
+    return true;
+  }
+
+  if (strCmd.substring(0, 3) == "$BI" ) {
+    gaKeyerData.lBeaconIntervalSeconds = strCmd.substring(4).toInt();
+
     strCmd = "";
     return true;
   }
@@ -674,14 +626,120 @@ boolean processCommands(String strCmd) {
   return false ;
 
 }
+////////////////////////////////////////////////////////////////////////
+// Add a leading zero when necessary
+// purloined from: http://www.technoblogy.com/list?1BHX
+  void Print2 (int n) {
+  if (n<10) Serial.print('0');
+  Serial.print(n);
+}
+
+void printTime() {
+  // Demonstrate clock
+  unsigned long Now = millis()/1000;
+  int Seconds = Now%60;
+  int Minutes = (Now/60)%60;
+  int Hours = (Now/3600)%24;
+
+
+  Print2(Hours); Serial.print(':'); 
+  Print2(Minutes); Serial.print(':'); 
+  Print2(Seconds); Serial.println();
+}
+///////////////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////////////
+// runBeacon() will send a beacon message at intervals.
+// SETTINGS:
+// glBeaconIntervalSeconds -- number of seconds between beacons, set using $Bi
+// gsBeaconMessage -- the string containing the beacon message, set using $BM
+
+unsigned long glTimeSinceLastBeacon = 0;
+
+void runBeacon() {
+  if (gaKeyerData.lBeaconIntervalSeconds == 0) {
+    glTimeSinceLastBeacon = 0;
+    return;
+  }
+  if (gaKeyerData.sBeaconMessage[0] == 0) {
+    return;
+  }
+
+
+
+
+  if ((millis() - glTimeSinceLastBeacon) >= (gaKeyerData.lBeaconIntervalSeconds * 1000)) {
+    // time for the beacon
+    glTimeSinceLastBeacon = millis();
+
+
+    gsLastMessage = gaKeyerData.sBeaconMessage;
+    //Serial.println(strCmd);
+    String sTemp = convertToMorse(gaKeyerData.sBeaconMessage);
+    if (sTemp.length() == 0) {
+      debugMsg("sTemp was null in runBeacon()");
+    }
+//int Hours = glTimeSinceLastBeacon / (1000*60*60);
+//int Minutes = (glTimeSinceLastBeacon % (1000*60*60)) / (1000*60);
+//int Seconds = ((glTimeSinceLastBeacon % (1000*60*60)) % (1000*60)) / 1000;
+Serial.print("BEACON: "); Serial.println(gaKeyerData.sBeaconMessage); Serial.println(sTemp);
+
+    Serial.print("Interval: "); Serial.println(gaKeyerData.lBeaconIntervalSeconds);
+   Serial.print("Event time (minutes): "); printTime();
+    Serial.print("Free RAM: "); Serial.println(freeRam());
+
+
+    gsMorse = sTemp; // post the CW string to the buffer monitored by the IRQ.
+    Timer1.initialize(glTimer_Interval);
+    Timer1.attachInterrupt(stateMachine); // stateMachine to run every ditTime
+
+
+  }
+
+
+}
+
+void blinkLED(int iTimeMilliseconds) {
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(iTimeMilliseconds);
+  digitalWrite(LED_BUILTIN, LOW);
+
+}
+unsigned long giLastHeartBeat = 0;
+const int iHeartBeatInterval = 5000;
+void runHeartBeat() {
+  if ((millis() - glLastKeyElementSent) <= 10000 ) {
+    return ;
+  }
+  if (gaKeyerData.iFLAGS & FLAG_ENABLE_HEARTBEAT) {
+
+    if ((millis() - giLastHeartBeat) >= iHeartBeatInterval) {
+      giLastHeartBeat = millis();
+      //noInterrupts();
+      blinkLED(150);
+
+      //interrupts();
+    }
+
+  }
+
+
+
+}
 
 //////////////////////////////////////////////////////////////
 // loop() is the "main" entry point for Arduino code. All roads lead from here.
 
 void loop() {
-  processKeyers(); // Poll the key to see what is needed
 
-  // TODO: Timers need to be invoked only after it is determined that the input string is intended to be sent as Morse code.
+  runHeartBeat();
+
+  runBeacon(); // if beacon is setup, run the beacon
+
+#if defined(INCLUDE_HAND_KEY)
+  processKeyers(); // Poll the key to see what is needed
+#endif
+
 
   String strInput;
 
@@ -699,8 +757,6 @@ void loop() {
 
   }
   strInput = "";
-
-  //interrupts();
 
 }
 
