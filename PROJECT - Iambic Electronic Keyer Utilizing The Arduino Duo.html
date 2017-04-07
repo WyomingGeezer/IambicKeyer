@@ -1,0 +1,323 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<html>
+<head>
+	<meta http-equiv="content-type" content="text/html; charset=utf-8">
+	<title></title>
+	<meta name="generator" content="LibreOffice 4.2.8.2 (Linux)">
+	<meta name="created" content="0;0">
+	<meta name="changed" content="20170328;112531517931414">
+	<meta name="sdfootnote" content=";;;;P">
+	<style type="text/css">
+	<!--
+		@page { margin: 1in }
+		p { margin-bottom: 0.1in; direction: ltr; color: #000000; font-family: "Arial", sans-serif; font-size: 11pt; font-style: normal; font-weight: normal; line-height: 120%; text-align: left; widows: 2; orphans: 2; text-decoration: none; page-break-before: auto; page-break-after: auto }
+		h1 { margin-top: 0.33in; margin-bottom: 0.08in; direction: ltr; color: #000000; font-family: "Arial", sans-serif; font-size: 18pt; font-style: normal; line-height: 115%; text-align: left; widows: 2; orphans: 2; text-decoration: none; page-break-before: auto; page-break-after: auto }
+		h2 { margin-top: 0.25in; margin-bottom: 0.06in; direction: ltr; color: #000000; font-family: "Arial", sans-serif; font-size: 14pt; font-style: normal; line-height: 115%; text-align: left; widows: 2; orphans: 2; text-decoration: none; page-break-before: auto; page-break-after: auto }
+		td p { margin-bottom: 0in; direction: ltr; color: #000000; font-family: "Arial", sans-serif; font-size: 11pt; font-style: normal; font-weight: normal; line-height: 115%; text-align: left; widows: 2; orphans: 2; text-decoration: none; page-break-before: auto; page-break-after: auto }
+		p.sdfootnote { margin-left: 0.24in; text-indent: -0.24in; margin-bottom: 0in; font-family: "Arial", sans-serif; font-size: 10pt; font-style: normal; font-weight: normal; line-height: 115% }
+		a:link { so-language: zxx }
+		a.sdfootnoteanc { font-size: 57% }
+	-->
+	</style>
+</head>
+<body lang="en-US" text="#000000" dir="ltr" style="border: none; padding: 0in">
+<p style="margin-top: 0.33in; margin-bottom: 0.08in; line-height: 115%; page-break-before: auto; page-break-after: auto"><a name="h.8rq19sif3cnz"></a>
+<font size="7" style="font-size: 36pt"><b>Iambic Electronic Keyer
+Utilizing The Arduino Duo</b></font></p>
+<h1 style="line-height: 115%; page-break-before: auto; page-break-after: auto"><a name="h.asgwsvujocwf"></a>
+1.0 Overview</h1>
+<p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+This project defines an electronic keyer based on the Arduino Duo and
+is modeled after the Iambic Keyer described in Glen Popiel, KW5GP's
+book, Arduino Ham Radio<a class="sdfootnoteanc" name="sdfootnote1anc" href="#sdfootnote1sym"><sup>1</sup></a>.</p>
+<p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+<br>
+</p>
+<p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+<b>REVISIONS</b>:</p>
+<p style="margin-bottom: 0in; line-height: 115%">03/24/2017 JRH
+Initial publication</p>
+<h1 style="line-height: 115%; page-break-before: auto; page-break-after: auto"><a name="h.p56solrj0n6o"></a>
+2.0 Requirements</h1>
+<h2 style="line-height: 115%; page-break-before: auto; page-break-after: auto"><a name="h.p8td9to4wvzg"></a>
+2.1 General Function</h2>
+<p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+<br>
+</p>
+<h2 style="line-height: 115%; page-break-before: auto; page-break-after: auto"><a name="h.yfhabmaoj08"></a>
+2.2 Inputs</h2>
+<ol>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Keyer input, two lines, return to ground, with internal pullup to 5
+	VDC. Connector to user key using stereo audio 3.5 mm jack on front
+	panel.</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Power switch for internal battery</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Toggle switch to route key input to output and bypassing the board</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Push button #1, switch to ground</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	USB for computer or PS2 keyboard</p>
+</ol>
+<p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+<br>
+</p>
+<h2 style="line-height: 115%; page-break-before: auto; page-break-after: auto"><a name="h.m2dl23drmrjx"></a>
+2.3 Outputs</h2>
+<ol>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Keyer output, two lines, opto isolated to radio (check specs)</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	USB connector to computer or PS2 keyboard</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%">External
+	speaker or mic output for rig interface.</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%">Key gate
+	output, active during keying.</p>
+</ol>
+<p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+<br>
+</p>
+<h2 style="line-height: 115%; page-break-before: auto; page-break-after: auto"><a name="h.z5n81b9b4ib8"></a>
+2.4 User Controls</h2>
+<ol>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Provide interface to keyer input of ICOM HF rigs.</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Provide input interface to a dual paddle Iambic keyer or straight
+	key.</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Interface to computer USB for programming and GUI</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Obtain power from USB (5 VDC)or an internal 9V battery with
+	regulation to 5 VDC.</p>
+</ol>
+<p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+<br>
+</p>
+<h2 style="line-height: 115%; page-break-before: auto; page-break-after: auto"><a name="h.jj8nw41jcgec"></a>
+2.5 Enclosure</h2>
+<ol>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Lower profile ABS plastic with no slip feet.</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Easy access to internal battery.</p>
+</ol>
+<p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+<br>
+</p>
+<h2 style="line-height: 115%; page-break-before: auto; page-break-after: auto"><a name="h.7c300dk27028"></a>
+2.6 Functions</h2>
+<ol>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Internal speaker for CW sidetone with means to enable or disable.</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Beacon mode to allow a CW message to key an external transmitter
+	with variable rate, code speed, hours of operation (start stop
+	times)</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Provide means to implement Farnsworth Keying.</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Provide means to vary code speed in such a way that it is easy to
+	adjust either at high or low speed.</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Provide means to swap dit/dah for lefties.</p>
+	<li><p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+	Provide means to handle a straight key, iambic paddle key, or bug.</p>
+</ol>
+<p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+<br>
+</p>
+<h1 style="line-height: 115%; page-break-before: auto; page-break-after: auto"><a name="h.gr82dray7n1q"></a>
+3.0 Design</h1>
+<p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+<br>
+</p>
+<p style="margin-bottom: 0in; line-height: 115%; page-break-before: auto; page-break-after: auto">
+<br>
+</p>
+<p style="margin-bottom: 0in; line-height: 115%"><br>
+</p>
+<table width="100%" cellpadding="4" cellspacing="0">
+	<col width="31*">
+	<col width="225*">
+	<tr valign="top">
+		<td width="12%" style="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0.04in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>COMMAND</p>
+		</td>
+		<td width="88%" style="border: 1px solid #000000; padding: 0.04in">
+			<p>ACTION</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$CS &lt;CALL SIGN&gt;</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Sets the callsign used internally. Example: $CS W7YV would set
+			the callsign to W7YV</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$EL</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>List the entire EEPROM contents in HEX form</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$EC</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Clear the EEPROM. This will force the EEPROM to be loaded with
+			default values when the board is reset.</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$EW</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Write current configuration to the EEPROM</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$ER</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Load the EEPROM contents. This restores settings to the EEPROM
+			values</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$KM</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Sets the Key Mode. Settings are: 0 = straight key, 1 = paddle,
+			2 = paddle reversed. For example, $KM 2 sets the key mode for a
+			standard paddle (left paddle dit and right paddle dash)</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$PDT</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Paddle DIT time in milliseconds. For the Arduino UNO, WPM
+			(words per minute) = 1200 / Paddle Dit Time. NOTE: The setting of
+			$WPM overrides this setting.</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$CR</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Display the copyright information</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$RESET</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Reset the processor. ** UNRELIABLE **</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$WPM</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Set Words Per Minute. Example $WPM 18 would set up 18 words per
+			minute.</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$DBD</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>De-bounce Delay. Example: $DBD 5 sets the processor to sample
+			the key again in 5 mS after the initial key down or key up
+			detection.</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$STF</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Side Tone Frequency sets the tone of the CW audio. Example:
+			$STF 650 sets the tone nto 650 Hz.</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$LM</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>$LM holds the last message sent and will send that message
+			again.</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$LS</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Lists the current settings of system variables. 
+			</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$BM</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Sets a Beacon Message. Example: $BM DE W7YV &lt;AR&gt; will set
+			the message.</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p>$BI</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p>Sets the Beacon Interval in seconds. Example: $BI 600 will
+			cause the beacon to be sent every 600 seconds, i.e., 10 minutes.
+			NOTE: Once $BM and $BI are set, use the $EW command to write the
+			data to the EEPROM in order to cause the board to start up with
+			the beacon running after a power outage.</p>
+		</td>
+	</tr>
+	<tr valign="top">
+		<td width="12%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: none; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0in">
+			<p><br>
+			</p>
+		</td>
+		<td width="88%" style="border-top: none; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000; padding-top: 0in; padding-bottom: 0.04in; padding-left: 0.04in; padding-right: 0.04in">
+			<p><br>
+			</p>
+		</td>
+	</tr>
+</table>
+<p style="margin-bottom: 0in; line-height: 115%"><br>
+</p>
+<p style="margin-bottom: 0in; line-height: 115%"><br>
+</p>
+<p style="margin-bottom: 0in; line-height: 115%"><br>
+</p>
+<p style="margin-bottom: 0in; line-height: 115%"><br>
+</p>
+<div id="sdfootnote1">
+	<p class="sdfootnote"><a class="sdfootnotesym" name="sdfootnote1sym" href="#sdfootnote1anc">1</a>Popiel,
+	Glen, KW5GP. “Arduino Ham Radio – A Radio Amateur's Guid to Open
+	Source Electronics and Microcontroller Projects.” ARRL, 2014</p>
+</div>
+</body>
+</html>
