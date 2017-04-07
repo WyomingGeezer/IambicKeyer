@@ -1,4 +1,7 @@
 
+
+
+
 /*
   ' *************************************************************
   ' FILE:    IambicKeyer.ino
@@ -18,11 +21,15 @@
   ' 03/26/2017 JRH Added beacon feature, added documentation, rearranged code sections
   ' 03/28/2017 JRH Fixed numerous bugs related to writing the EEPROM and beacon. Implemented
   ' F() macro.
+  ' 04/06/2017 JRH Added flags to enable random words to be sent from a lookup table in the Beacon Mode
+  '                Added Farnsworth Timing. NEEDS WORK. SEE: http://www.arrl.org/files/file/Technology/x9004008.pdf
   '
   ' TODO:
   1. Add code for an LCD display
   2. Add code for recording Morse code as sent.
   3. Flesh out documentation, including a schematic of the desired implementation.
+  4. Clean up Farnsworth method.
+  5. Redesign flag system to remove potential timing conflicts.
   '****************************************************************
     Copyright (C) 2017 JAMES R. HARVEY
 
@@ -41,18 +48,23 @@
 
 */
 /* GENERAL NOTES
- *  1. F() MACRO: See https://www.baldengineer.com/arduino-f-macro.html as well as
- *  http://playground.arduino.cc/Learning/Memory . This macro refers to "the string
- *  stored in flash memory" and saves dynamic RAM space.
- *  
+    1. F() MACRO: See https://www.baldengineer.com/arduino-f-macro.html as well as
+    http://playground.arduino.cc/Learning/Memory . This macro refers to "the string
+    stored in flash memory" and saves dynamic RAM space.
+
 
 */
+#include <avr/pgmspace.h>
+
+
+
 #define INCLUDE_HAND_KEY
 
 
 
 
 // INCLUDE FILES FROM ARDUINO LIBRARY
+#include <Agenda.h>
 #include <EEPROM.h>
 // See http://playground.arduino.cc/Code/Timer1
 #include <TimerOne.h>
@@ -67,6 +79,7 @@
 
 #include "morse.h"
 #include "copyright.h"
+#include "jrhlib1.h"
 
 
 /*
@@ -117,10 +130,16 @@ const int pin_SPEAKER_BLACK = 5; // PIN5, connected to the speaker BLACK lead
 const int KEY_STRAIGHT = 0;
 const int KEY_PADDLE = 1;
 const int KEY_PADDLE_REVERSE = 2;
-const unsigned long EEPROM_Signature = 0x195A0B0F;
+const unsigned long EEPROM_Signature = 0x197A0B2F;
 const int FLAG_ENABLE_DEBUG = 1;
 const int FLAG_ENABLE_HEARTBEAT = 2;
-const int FLAG_DISABLE_AUDIO = 4;
+const int FLAG_ENABLE_AUDIO = 4;
+const int FLAG_DEBUG_SHOW_FREE_RAM = 8;
+const int FLAG_ENABLE_BEACON = 16;
+const int FLAG_ENABLE_RANDOM_MORSE = 32;
+const int FLAG_ENABLE_KEYER = 64;
+const int FLAG_ENABLE_KEYBOARD_MORSE = 128;
+
 
 
 /////////////////////////////////////////////////////////////////
@@ -128,7 +147,7 @@ const int FLAG_DISABLE_AUDIO = 4;
 long glTimer_Interval = 55712; // dit period in microseconds
 volatile String gsMorse; // string of Morse, i.e., "CQ" = "-.-. --.-" (note the space between the characters. This forces a one-dit space.
 volatile long glLastKeyElementSent;
-volatile boolean gbState = false; // use in StateMachine function
+volatile boolean gbState = true; // use in StateMachine function
 String gsLastMessage; // holds the last message sent by StateMachine
 //gaKeyerData.iSideToneFrequency = 650; // CW side tone frequency.
 int giPADDLE_DIT_TIME = 75 ; //wpm = 1200 / pdt . Milliseconds for basic dit length.
@@ -143,13 +162,17 @@ volatile unsigned long glKeyChangeTime = 0;
 int giPinKEY_DIT ;
 int giPinKEY_DASH;
 
-
+Agenda scheduler;
 //int giKeyMode = KEY_PADDLE;// defautl key value. Change with $KM
 
 struct KeyerSetupData {
   unsigned long ulSignature ;
   int iFLAGS ;
+  byte byPracticeDigits;
+  unsigned long ulSecondsPracticeDelay;
+  byte byPracticeFlags;
   int iSideToneFrequency;
+  int iFarnsworth;
   byte bKeyMode;
   byte bDebounceDelay;
   long lBeaconIntervalSeconds;
@@ -160,15 +183,28 @@ struct KeyerSetupData {
 
 KeyerSetupData gaKeyerData = {
   EEPROM_Signature , // EEPROM signature
-  FLAG_ENABLE_HEARTBEAT,
+  FLAG_ENABLE_HEARTBEAT + FLAG_ENABLE_AUDIO,
+  3, // practiceDigits
+  30, // ulSecondsPracticeDelay (seconds)
+  0, // byPracticeFlags;  0 = off
   650, // side tone
+  0, // Farnsworth increase percent
   1, // key mode
   5, // debounce delay
   0, // beacon interval
-  16, // wpm
+  18, // wpm
   "W7YV",
   "DE W7YV <AR>"
 };
+/*
+  void runTest() {
+  for (int i = 0 ; i < 100 ; i++ ) {
+    char cResultArray[15] = { 0 };
+        getRandomString(cResultArray);;
+
+  }
+  }
+*/
 
 /////////////////////////////////////////////////////////////////
 void setup() {
@@ -178,11 +214,15 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT); // Blinks when morse is sending or when key is down
   pinMode(giPinKEY_LEFT, INPUT_PULLUP);
   pinMode(giPinKEY_RIGHT, INPUT_PULLUP);
-  
+
 
   // Brag stuff
+  randomSeed(analogRead(0));
   Serial.begin(9600);
+
+
   Serial.println(F(Copyright));
+  Serial.println(F("Version 0.2 04/03/2017"));
   Serial.println(F("Type $CR for additional copyright information."));
   Serial.print(F("EEPROM size: ")); Serial.println(EEPROM.length());
   Serial.print(F("Free RAM: ")); Serial.println(freeRam());
@@ -199,9 +239,15 @@ void setup() {
     Serial.println(F("Loading EEPROM settings"));
     gaKeyerData = dataEEPROM;
   }
-  setWordsPerMinute(gaKeyerData.byWPM);  
+  setWordsPerMinute(gaKeyerData.byWPM);
 
   listSettings();
+
+  scheduler.insert(runHeartBeat, 5000000);
+  scheduler.insert(runBeacon, 10000000); // if beacon is setup, run the beacon
+  scheduler.insert(runKeyboard, 500000);
+
+  //runTest();
 
   Serial.println("####################################################");
 }
@@ -243,7 +289,7 @@ void setWordsPerMinute(int wpm) {
 // gbState - the State Variable that toggles between key down and key up conditions.
 // Other - see definitions elsewhere in this document.
 void stateMachine() {
-
+  debugMsg ("stateMachine(" + String(gbState) + ")");
   if (gbState == true) {
 
     if (gsMorse.length() != 0) {
@@ -251,11 +297,11 @@ void stateMachine() {
       element = gsMorse.substring(0, 1);
 
       if (element == " ") {
-        Timer1.initialize(glTimer_Interval * 2);
+        Timer1.initialize(glTimer_Interval * 2 * ( 1 + gaKeyerData.iFarnsworth / 10));
       }
       if (element == ".") {
         digitalWrite(LED_BUILTIN, HIGH);
-        if ((gaKeyerData.iFLAGS & FLAG_DISABLE_AUDIO) == 0) {
+        if ((gaKeyerData.iFLAGS & FLAG_ENABLE_AUDIO) != 0) {
           toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, gaKeyerData.iSideToneFrequency);
         }
         //Serial.print("650");
@@ -263,7 +309,7 @@ void stateMachine() {
       }
       if (element == "-") {
         digitalWrite(LED_BUILTIN, HIGH);
-        if ((gaKeyerData.iFLAGS & FLAG_DISABLE_AUDIO) == 0) {
+        if ((gaKeyerData.iFLAGS & FLAG_ENABLE_AUDIO) != 0) {
           toneAC2(pin_SPEAKER_RED, pin_SPEAKER_BLACK, gaKeyerData.iSideToneFrequency);
         }
         Timer1.initialize(glTimer_Interval * 3);
@@ -280,29 +326,34 @@ void stateMachine() {
 
 
   if (gbState == false) {
-    Timer1.initialize(glTimer_Interval);
+    Timer1.initialize(glTimer_Interval * ( 1 + gaKeyerData.iFarnsworth / 10));
     noToneAC2();
     digitalWrite(LED_BUILTIN, LOW);
   }
   gbState = !gbState ;
+  debugMsg ("stateMachine()");
 }
-
+/////////////////////////////////////////////////////////////////
 void debugMsg(String sMsg) {
 
   if (gaKeyerData.iFLAGS & FLAG_ENABLE_DEBUG) {
-    Serial.println(sMsg);
-    Serial.println(freeRam());
+    Serial.println("DBG: " + sMsg);
+    if (gaKeyerData.iFLAGS & FLAG_DEBUG_SHOW_FREE_RAM) {
+      Serial.println(freeRam());
+    }
   }
 }
 
 /////////////////////////////////////////////////////////////////
-// convertToMorse() takes a text string and converts it to a string of
+// corse() takes a text string and converts it to a string of
 // Morse code dots and dashes.
 // INPUT: English text string
 // OUPUT: Morse code string of dots and dashes
 //
 // Prosigns are implemented using the <> characters to bracket the letters. For example,
 // the prosign <BT> is sent as "-...-"
+
+
 
 String convertToMorse(String strText) {
   debugMsg ("Enter convertToMorse(" + strText + ")");
@@ -353,6 +404,33 @@ String convertToMorse(String strText) {
 
     }
 
+    if (letter == '?') {
+      strInput.concat("..--..");
+      strInput.concat(sSpacer);
+
+    }
+    if (letter == '.') {
+      strInput.concat(".-.-.-");
+      strInput.concat(sSpacer);
+
+    }
+    if (letter == '/') {
+      strInput.concat("-..-.");
+      strInput.concat(sSpacer);
+
+    }
+    if (letter == ',') {
+      strInput.concat("--..--");
+      strInput.concat(sSpacer);
+
+    }
+    if (letter == '@') {
+      strInput.concat(".--.-.");
+      strInput.concat(sSpacer);
+
+    }
+
+
   }
 
   return strInput;
@@ -372,15 +450,11 @@ String getInputLine(void) {
 
   while (Serial.available() > 0) {
     delay(10);
-    //Serial.print(Serial.available());
-    //toneAC2(2, 3, 650,50);
+
     char letter = Serial.read(); // read ONE character from the keyboard
     Serial.print(letter);
-    //delay(500);
-    //Serial.println(int(letter));
-    //noInterrupts();
+
     if (letter == 13 ) { //look for CR key
-      //Serial.println(strInput);
       Serial.println();
       sResult = gsBuffer;
       gsBuffer = "";
@@ -409,14 +483,14 @@ void listSettings() {
   Serial.print("$STF "); Serial.println(gaKeyerData.iSideToneFrequency);
   Serial.print("$BI "); Serial.println(gaKeyerData.lBeaconIntervalSeconds);
   Serial.print("$BM "); Serial.println(gaKeyerData.sBeaconMessage);
+  Serial.print("$FW "); Serial.println(gaKeyerData.iFarnsworth, DEC);
   Serial.print("$SF "); Serial.println(gaKeyerData.iFLAGS, HEX);
   Serial.print(F("Free Memory: ")); Serial.println(freeRam());
 
 
 
-
 }
-
+/////////////////////////////////////////////////////////////////
 void(* resetFunc) (void) = 0;//declare reset function at address 0
 
 
@@ -453,9 +527,13 @@ void clearEEPROM() {
 }
 
 
-
+/////////////////////////////////////////////////////////////////
 
 boolean processCommands(String strCmd) {
+
+  debugMsg ("processCommands(" + strCmd + ")");
+
+
   strCmd.toUpperCase();
   if (strCmd.substring(0, 9) == "$CS" ) {
     Serial.print(F("Callsign was ")) ; Serial.println(gaKeyerData.callsign);
@@ -489,7 +567,7 @@ boolean processCommands(String strCmd) {
 
     EEPROM.put(0, gaKeyerData);
     listEEPROM();
-    
+
     return true;
   }
 
@@ -513,8 +591,43 @@ boolean processCommands(String strCmd) {
 
     return true;
   }
+  if (strCmd.substring(0, 3) == "$FW") {
 
 
+    gaKeyerData.iFarnsworth = strCmd.substring(3).toInt();
+    Serial.print(F("Farnsworth Spacing set to  ")); Serial.println(gaKeyerData.iFarnsworth);
+
+    return true;
+  }
+
+
+
+
+  if (strCmd.substring(0, 4) == "$MPD") {
+
+
+    gaKeyerData.byPracticeDigits = strCmd.substring(4).toInt();
+    Serial.print(F("Practice digits set to ")); Serial.println(gaKeyerData.byPracticeDigits);
+
+    return true;
+  }
+
+  if (strCmd.substring(0, 4) == "$MPS") {
+
+
+    gaKeyerData.ulSecondsPracticeDelay = strCmd.substring(4).toInt();
+    Serial.print(F("Practice delay set to ")); Serial.println(gaKeyerData.ulSecondsPracticeDelay);
+
+    return true;
+  }
+  if (strCmd.substring(0, 4) == "$MPF") {
+
+
+    gaKeyerData.byPracticeFlags = strCmd.substring(4).toInt();
+    Serial.print(F("Practice flags set to ")); Serial.println(gaKeyerData.byPracticeFlags);
+
+    return true;
+  }
   if (strCmd.substring(0, 4) == "$PDT") {
 
 
@@ -619,9 +732,12 @@ boolean processCommands(String strCmd) {
   }
   // if here, there are no commands so we assume the input is a msg to send
   gsLastMessage = strCmd;
-  //Serial.println(strCmd);
+
   String sTemp = convertToMorse(strCmd);
-  Serial.println(sTemp);
+  Serial.println(sTemp); // show the morse string to send
+  Timer1.initialize(glTimer_Interval);
+  Timer1.attachInterrupt(stateMachine); // stateMachine to run every ditTime
+
   gsMorse = sTemp; // post the CW string to the buffer monitored by the IRQ.
   return false ;
 
@@ -629,21 +745,17 @@ boolean processCommands(String strCmd) {
 ////////////////////////////////////////////////////////////////////////
 // Add a leading zero when necessary
 // purloined from: http://www.technoblogy.com/list?1BHX
-  void Print2 (int n) {
-  if (n<10) Serial.print('0');
-  Serial.print(n);
-}
 
 void printTime() {
   // Demonstrate clock
-  unsigned long Now = millis()/1000;
-  int Seconds = Now%60;
-  int Minutes = (Now/60)%60;
-  int Hours = (Now/3600)%24;
+  unsigned long Now = millis() / 1000;
+  int Seconds = Now % 60;
+  int Minutes = (Now / 60) % 60;
+  int Hours = (Now / 3600) % 24;
 
 
-  Print2(Hours); Serial.print(':'); 
-  Print2(Minutes); Serial.print(':'); 
+  Print2(Hours); Serial.print(':');
+  Print2(Minutes); Serial.print(':');
   Print2(Seconds); Serial.println();
 }
 ///////////////////////////////////////////////////////////////
@@ -671,22 +783,30 @@ void runBeacon() {
   if ((millis() - glTimeSinceLastBeacon) >= (gaKeyerData.lBeaconIntervalSeconds * 1000)) {
     // time for the beacon
     glTimeSinceLastBeacon = millis();
+    String sStringToSend = gaKeyerData.sBeaconMessage;
+
+    if ((gaKeyerData.iFLAGS & FLAG_ENABLE_RANDOM_MORSE) != 0) {
 
 
-    gsLastMessage = gaKeyerData.sBeaconMessage;
+      char cResultArray[10] = { 0 };
+      getRandomString(cResultArray);
+
+      sStringToSend = String(cResultArray);
+    }
+
+    sStringToSend.toUpperCase();
+    gsLastMessage = sStringToSend;
     //Serial.println(strCmd);
-    String sTemp = convertToMorse(gaKeyerData.sBeaconMessage);
+    String sTemp = convertToMorse(sStringToSend) ; //gaKeyerData.sBeaconMessage);
     if (sTemp.length() == 0) {
       debugMsg("sTemp was null in runBeacon()");
     }
-//int Hours = glTimeSinceLastBeacon / (1000*60*60);
-//int Minutes = (glTimeSinceLastBeacon % (1000*60*60)) / (1000*60);
-//int Seconds = ((glTimeSinceLastBeacon % (1000*60*60)) % (1000*60)) / 1000;
-Serial.print("BEACON: "); Serial.println(gaKeyerData.sBeaconMessage); Serial.println(sTemp);
 
-    Serial.print("Interval: "); Serial.println(gaKeyerData.lBeaconIntervalSeconds);
-   Serial.print("Event time (minutes): "); printTime();
-    Serial.print("Free RAM: "); Serial.println(freeRam());
+    Serial.print(F("BEACON: ")); Serial.println(sStringToSend);
+
+    Serial.print(F("Interval: ")); Serial.println(gaKeyerData.lBeaconIntervalSeconds);
+    Serial.print(F("Event time (minutes): ")); printTime();
+    Serial.print(F("Free RAM: ")); Serial.println(freeRam());
 
 
     gsMorse = sTemp; // post the CW string to the buffer monitored by the IRQ.
@@ -698,47 +818,45 @@ Serial.print("BEACON: "); Serial.println(gaKeyerData.sBeaconMessage); Serial.pri
 
 
 }
+const char morseelements[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789?,.@/" ;
 
+String getRandomString(int iCount) {
+
+  char c[10] = { 0 }; //Serial.println(sizeof(c));
+
+  for (int i = 0; i < iCount ; i++ ) {
+    c[i] = morseelements [random(0, sizeof(morseelements)) ];
+
+
+
+  }
+  return String(c) ;
+
+
+}
+
+/////////////////////////////////////////////////////////////////
 void blinkLED(int iTimeMilliseconds) {
   digitalWrite(LED_BUILTIN, HIGH);
   delay(iTimeMilliseconds);
   digitalWrite(LED_BUILTIN, LOW);
 
 }
-unsigned long giLastHeartBeat = 0;
-const int iHeartBeatInterval = 5000;
+
 void runHeartBeat() {
-  if ((millis() - glLastKeyElementSent) <= 10000 ) {
-    return ;
-  }
-  if (gaKeyerData.iFLAGS & FLAG_ENABLE_HEARTBEAT) {
+  blinkLED(150);
+  return;
 
-    if ((millis() - giLastHeartBeat) >= iHeartBeatInterval) {
-      giLastHeartBeat = millis();
-      //noInterrupts();
-      blinkLED(150);
-
-      //interrupts();
-    }
-
-  }
 
 
 
 }
 
-//////////////////////////////////////////////////////////////
-// loop() is the "main" entry point for Arduino code. All roads lead from here.
 
-void loop() {
 
-  runHeartBeat();
+void runKeyboard() {
 
-  runBeacon(); // if beacon is setup, run the beacon
 
-#if defined(INCLUDE_HAND_KEY)
-  processKeyers(); // Poll the key to see what is needed
-#endif
 
 
   String strInput;
@@ -747,8 +865,8 @@ void loop() {
 
 
   if (strInput.length()) { // if a string exists, start the timers and prepare to generate Morse code.
-    Timer1.initialize(glTimer_Interval);
-    Timer1.attachInterrupt(stateMachine); // stateMachine to run every ditTime
+    //Timer1.initialize(glTimer_Interval);
+    // Timer1.attachInterrupt(stateMachine); // stateMachine to run every ditTime
 
 
     if (processCommands(strInput) == false) {
@@ -757,6 +875,27 @@ void loop() {
 
   }
   strInput = "";
+
+
+
+
+}
+//////////////////////////////////////////////////////////////
+// loop() is the "main" entry point for Arduino code. All roads lead from here.
+
+void loop() {
+
+
+
+
+  scheduler.update();
+
+        if ((gaKeyerData.iFLAGS & FLAG_ENABLE_KEYER) != 0) {
+          processKeyers();
+        }
+
+
+
 
 }
 
